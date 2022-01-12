@@ -77,9 +77,9 @@ update @ 2022/01/12
 	
 	- enable RTC and CRC , Timer1 module
 	
-4. Need to use ICP tool , to programm boot loader project file (APROM_Bootloader.bin)
+4. Need to use ICP tool , to programm boot loader project file (APROM_Bootloader.bin , Application code )
 
-below is boot loader APROM setting and program LDROM , APROM , config 
+below is boot loader APROM setting and program APROM , config 
 
 ![image](https://github.com/released/M480BSP_IAP_HID_20_APROM/blob/main/APROM_ICP.jpg)
 
