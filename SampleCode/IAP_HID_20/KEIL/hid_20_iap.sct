@@ -1,0 +1,14 @@
+LOAD_ROM_1  0x00000 0x5000
+{
+	APROM_Bootloader.bin  0x00000 0x5000
+	{
+		startup_M480.o (RESET, +FIRST)
+        .ANY (+RO)
+	}
+	
+	SRAM  0x20000000 0x20000
+	{
+		* (+RW, +ZI)
+	}
+}
+
