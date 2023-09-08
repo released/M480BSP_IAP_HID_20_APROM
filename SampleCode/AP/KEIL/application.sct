@@ -1,6 +1,6 @@
-LOAD_ROM_1  0x5000 0x7A000
+LOAD_ROM_1  0x10000 0x70000
 {
-	APROM_Bootloader.bin  0x5000 0x7A000
+	APROM_Bootloader.bin  0x10000 0x70000
 	{
 		startup_M480.o (RESET, +FIRST)
         .ANY (+RO)

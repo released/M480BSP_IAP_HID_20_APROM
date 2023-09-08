@@ -13,6 +13,8 @@ srec_cat @generateCRCbinary.cmd
 
 srec_cat @generateCRChex.cmd
 
+srec_cat @generateCRChexOffset.cmd
+
 ::srec_cat template.hex -intel -checksum-negative-big-endian 0x5000 1 -o -HEX_Dump
 
 ::pause

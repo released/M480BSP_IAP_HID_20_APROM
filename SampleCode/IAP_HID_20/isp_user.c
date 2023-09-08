@@ -11,42 +11,83 @@
 #include "string.h"
 #include "isp_user.h"
 
-__align(4) uint8_t response_buff[64];
-__align(4) static uint8_t aprom_buf[FMC_FLASH_PAGE_SIZE];
-
+volatile uint8_t bISPDataReady;
+#ifdef __ICCARM__
+#pragma data_alignment=4
+uint8_t response_buff[64];
+#pragma data_alignment=4
+static uint8_t aprom_buf[FMC_FLASH_PAGE_SIZE];
+#else
+__attribute__((aligned(4))) uint8_t response_buff[64];
+__attribute__((aligned(4))) static uint8_t aprom_buf[FMC_FLASH_PAGE_SIZE];
+#endif
 uint32_t bUpdateApromCmd;
 uint32_t g_apromSize, g_dataFlashAddr, g_dataFlashSize;
 
-uint8_t rtc_read_magic_tag(void)
+
+void FMC_ISP(uint32_t u32Cmd, uint32_t u32Addr, uint32_t u32Data)
 {
-    uint8_t tag;
+    FMC_ENABLE_AP_UPDATE();    
     
-    RTC_EnableSpareAccess();
-
-    RTC->RWEN = RTC_WRITE_KEY;
-    while(!(RTC->RWEN & RTC_RWEN_RWENF_Msk));
+    FMC->ISPCMD = u32Cmd;
+    FMC->ISPADDR = u32Addr;
+    FMC->ISPDAT = u32Data;
+    FMC->ISPTRG = FMC_ISPTRG_ISPGO_Msk;
+    __ISB();
+    //while(FMC->ISPTRG);
+    while (FMC->ISPTRG & FMC_ISPTRG_ISPGO_Msk) { }
     
-    tag =  RTC_READ_SPARE_REGISTER(0);
-
-    LDROM_DEBUG("Read MagicTag <0x%02X>\r\n", tag);
-    
-    return tag;
-}
-
-void rtc_write_magic_tag(uint8_t tag)
-{
-    RTC_EnableSpareAccess();
-
-    RTC->RWEN = RTC_WRITE_KEY;
-    while(!(RTC->RWEN & RTC_RWEN_RWENF_Msk));
-    
-    RTC_WRITE_SPARE_REGISTER(0, tag);
-    
-    LDROM_DEBUG("Write MagicTag <0x%02X>\r\n", tag);
+    if (FMC->ISPCTL & FMC_ISPCTL_ISPFF_Msk)
+    {    
+        
+        LDROM_DEBUG("ISPCTL : ISPFF(0x%2X)\r\n" , FMC->ISPCTL);
+        FMC->ISPCTL |= FMC_ISPCTL_ISPFF_Msk;
+        while(1);
+    }
 }
 
 
-static uint16_t Checksum(unsigned char *buf, int len)
+void SystemReboot_RST(unsigned char addr , unsigned char sel)     // Reset I/O and peripherals ,  BS(FMC_ISPCTL[1]) reload from CONFIG setting (CBS)
+{
+    while(!UART_IS_TX_EMPTY(UART0));
+        
+    /* Unlock protected registers */
+    SYS_UnlockReg();
+    /* Enable FMC ISP function */
+    FMC_Open();
+
+    switch(addr) // CONFIG: w/ IAP
+    {
+        case RST_ADDR_LDROM:
+            /* Mask all interrupt before changing VECMAP to avoid wrong interrupt handler fetched */
+            __set_PRIMASK(1);    
+            FMC_SetVectorPageAddr(FMC_LDROM_BASE);
+            FMC_SET_LDROM_BOOT();        
+            break;
+        case RST_ADDR_APROM:
+            /* Mask all interrupt before changing VECMAP to avoid wrong interrupt handler fetched */
+            __set_PRIMASK(1);    
+            FMC_SetVectorPageAddr(FMC_APROM_BASE);
+            FMC_SET_APROM_BOOT();        
+            break;            
+    }
+
+    switch(sel)
+    {
+        case RST_SEL_NVIC:  // Reset I/O and peripherals , only check BS(FMC_ISPCTL[1])
+            NVIC_SystemReset();
+            break;
+        case RST_SEL_CPU:   // Not reset I/O and peripherals
+            SYS_ResetCPU();
+            break;   
+        case RST_SEL_CHIP:
+            SYS_ResetChip();// Reset I/O and peripherals ,  BS(FMC_ISPCTL[1]) reload from CONFIG setting (CBS)
+            break;                       
+    } 
+}
+
+
+__STATIC_INLINE uint16_t Checksum(unsigned char *buf, int len)
 {
     int i;
     uint16_t c;
@@ -80,13 +121,12 @@ static uint16_t CalCheckSum(uint32_t start, uint32_t len)
 
     return lcksum;
 }
-
 int ParseCmd(unsigned char *buffer, uint8_t len)
 {
     static uint32_t StartAddress, StartAddress_bak, TotalLen, TotalLen_bak, LastDataLen, g_packno = 1;
     uint8_t *response;
     uint16_t lcksum;
-    uint32_t lcmd, srclen, i, regcnf0, security;
+    uint32_t lcmd, srclen, /*i,*/ regcnf0, security;
     unsigned char *pSrc;
     static uint32_t	gcmd;
     response = response_buff;
@@ -122,17 +162,14 @@ int ParseCmd(unsigned char *buffer, uint8_t len)
     else if (lcmd == CMD_RUN_APROM || lcmd == CMD_RUN_LDROM || lcmd == CMD_RESET)
     {
 		#if 1
-        rtc_write_magic_tag(0xBB); 
         
         //
         // In order to verify the checksum in the application, 
         // do CHIP_RST to enter bootloader again.
         //
-        LDROM_DEBUG("Perform CHIP_RST...\r\n");
-        while(!UART_IS_TX_EMPTY(UART0));
-        
-        SYS_UnlockReg();
-        SYS_ResetChip();
+        LDROM_DEBUG("ISP flow :Perform RST...\r\n");
+
+        SystemReboot_RST(RST_ADDR_APROM,RST_SEL_CHIP);
 		#else
         outpw(&SYS->RSTSTS, 3);//clear bit
 
@@ -165,7 +202,9 @@ int ParseCmd(unsigned char *buffer, uint8_t len)
     }
     else if ((lcmd == CMD_UPDATE_APROM) || (lcmd == CMD_ERASE_ALL))
     {
-        EraseAP(FMC_APROM_BASE, (g_apromSize < g_dataFlashAddr) ? g_apromSize : g_dataFlashAddr); // erase APROM // g_dataFlashAddr, g_apromSize
+    	FMC_ENABLE_AP_UPDATE();
+//        EraseAP(FMC_APROM_BASE, (g_apromSize < g_dataFlashAddr) ? g_apromSize : g_dataFlashAddr); // erase APROM // g_dataFlashAddr, g_apromSize
+		EraseAP(APROM_APPLICATION_START, (g_apromSize < g_dataFlashAddr) ? g_apromSize : g_dataFlashAddr); // erase APROM // g_dataFlashAddr, g_apromSize
 
         if (lcmd == CMD_ERASE_ALL)   //erase data flash
         {
@@ -199,7 +238,8 @@ int ParseCmd(unsigned char *buffer, uint8_t len)
         }
         else
         {
-            StartAddress = 0;
+//            StartAddress = 0;
+			StartAddress = APROM_APPLICATION_START;
         }
 
         //StartAddress = inpw(pSrc);

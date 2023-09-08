@@ -10,26 +10,18 @@
 #ifndef ISP_USER_H
 #define ISP_USER_H
 
+#define RST_ADDR_LDROM                      (0)
+#define RST_ADDR_APROM                      (1)
+#define RST_SEL_NVIC                        (0)
+#define RST_SEL_CPU                         (1)
+#define RST_SEL_CHIP                        (2)
 
 #define LDROM_DEBUG(format, args...) 		printf("\033[1;36m" "[LDROM]" format "\033[0m", ##args)
 
 
 #define FW_VERSION                          0x32
-
-/*
-		flash page : 4K (0x1000)
-		boot loader in APROM : 4K*5 (pos : start from 0x00000)
-		dataflash : 4K , 0x7F000 
-
-		application code address : 0x5000 (pos : start from 0x5000)
-		application code checksum : 0x7EFFC
-		application code size : 0x7A000
-
-*/
-#define FLASH_SIZE				      		(0x00080000UL)	// 512K
-#define TARGET_BOOTLOADER_SIZE      		(0x00005000UL)	// 20K , IAP
-#define TARGET_FLASH_SIZE      				(0x00001000UL)	// 1K
-#define APROM_APPLICATION_SIZE      		(FLASH_SIZE - TARGET_BOOTLOADER_SIZE - TARGET_FLASH_SIZE)	//(0x0007B000UL - 0x1000)
+#define APROM_APPLICATION_START      		0x00010000UL	// boot code size : 64K
+#define APROM_APPLICATION_SIZE      		0x00070000UL	// assume application code use 484K 
 
 #include "fmc_user.h"
 
@@ -61,11 +53,25 @@ extern uint32_t GetApromSize(void);
 extern int ParseCmd(unsigned char *buffer, uint8_t len);
 extern uint32_t g_apromSize, g_dataFlashAddr, g_dataFlashSize;
 
-uint8_t rtc_read_magic_tag(void);
-void rtc_write_magic_tag(uint8_t tag);
+void FMC_ISP(uint32_t u32Cmd, uint32_t u32Addr, uint32_t u32Data);
+void SystemReboot_RST(unsigned char addr , unsigned char sel);
+//uint8_t read_magic_tag(void);
+//void write_magic_tag(uint8_t tag);
 
+void set_TimeoutFlag(uint8_t flag);
+uint8_t get_TimeoutFlag(void);
+void check_Timeout(void);
 
-extern __align(4) uint8_t usb_rcvbuf[];
-extern __align(4) uint8_t usb_sendbuf[];
-extern __align(4) uint8_t response_buff[64];
+#ifdef __ICCARM__
+#pragma data_alignment=4
+extern uint8_t usb_rcvbuf[];
+#pragma data_alignment=4
+extern uint8_t usb_sendbuf[];
+#pragma data_alignment=4
+extern uint8_t response_buff[64];
+#else
+extern __attribute__((aligned(4))) uint8_t usb_rcvbuf[];
+extern __attribute__((aligned(4))) uint8_t usb_sendbuf[];
+extern __attribute__((aligned(4))) uint8_t response_buff[64];
+#endif
 #endif  // #ifndef ISP_USER_H
